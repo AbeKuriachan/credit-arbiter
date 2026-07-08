@@ -236,3 +236,6 @@ models/**/*.joblib
 
 # ML visualization plots
 reports/ml/**/*.png
+
+# Uploaded applicant documents (US-301) - local dev storage only
+uploads/
