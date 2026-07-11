@@ -128,6 +128,50 @@ retrained clean and the numbers below are the honest post-fix result.
   other API misuse` errors under load. Real fix: `pool_size=50` + sqlite
   `timeout=15` busy-wait in `src/api/database.py`.
 
+## Progress Summary (Sprint 5, in progress)
+- [x] **US-205 Retrieval quality monitoring**:
+  `src/api/services/retrieval_quality.py` - a pragmatic stand-in for RAGAS
+  context precision/recall (single-relevant-clause-per-query eval against
+  the existing `data/eval/retrieval_eval_set.json`, not the full LLM-judge
+  RAGAS metric - same documented-simplification style as US-404's grounding
+  check). precision = top-1 hit rate (matches how `assessment.py` actually
+  consumes retrieval - only `clauses[0]` drives the recommendation); recall
+  = hit-in-top-k. Runnable as the "daily eval job" via
+  `python -m scripts.retrieval_quality_report` (currently 91.7%/100%, both
+  above the 0.85 floor). Live retrieval failure rate (not just the static
+  eval set) is now in `GET /api/metrics` - `retrieval_failure_rate` +
+  `retrieval_failure_alert` (fires above the 5% AC threshold), surfaced on
+  the ops dashboard.
+- [x] **US-207 Policy version management & re-index trigger**: source_id +
+  version were already stamped on every retrieved clause and persisted
+  verbatim in `DecisionRecord.evidence_chain_json` (US-204) - old decisions
+  are already replayable against the exact clause text/version they saw,
+  no redesign needed there. New: `retrieval.py:reindex_corpus(path)` hot-
+  reloads the TF-IDF index from disk without a restart, wired to
+  `POST /api/policy/reindex` (auth-gated like every other endpoint - no
+  precedent for role-scoped admin gating elsewhere in this codebase, so
+  none was added here either), which also upserts the `PolicyCorpusVersion`
+  row (reusing `scripts/seed_db.py`'s upsert-by-version+source_file
+  pattern).
+- [x] **US-406 subset - Secrets scan + external-call audit log**:
+  `scripts/scan_secrets.py` (stdlib regex, no new dependency) scans every
+  git-tracked file for hardcoded secret-shaped literals - flags known key
+  prefixes (`gsk_`, `sk-`, `AKIA...`, `ghp_`, `xox...`) and generic
+  `key/secret/token/password = "literal"` assignments, ignores
+  `os.environ.get(...)` lookups and placeholder values. Run via
+  `python -m scripts.scan_secrets`; asserted clean by
+  `tests/test_secrets_scan.py::test_repo_scan_is_clean`. Every issued (not
+  skipped) Groq call now writes a JSON-line audit entry via
+  `src/api/audit_log.py` to `logs/external_calls.log` (gitignored - runtime
+  output, not source), success and failure both recorded. Least-privilege
+  IAM/vault integration deferred - no cloud infra in this POC to scope it
+  against.
+- [x] **US-410 Runbook**: `docs/RUNBOOK.md` - deploy, rollback (code/model/
+  fairness-thresholds, in that order), kill-switch, a known-failure-mode
+  table, on-call escalation steps, retrain sequence, and a 4-step
+  degraded-mode tabletop drill (LLM outage, kill-switch, DB unreachable,
+  recovery) with an expected-behavior check for each step.
+
 ### Explicitly not done (needs real humans, not more code)
 - **US-408 underwriter pilot**: requires 3 real underwriters processing real
   files; not applicable to an automated coding pass.
