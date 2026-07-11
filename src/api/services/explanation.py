@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("halcyon.explanation")
 
+from .. import audit_log
 from .pii_redaction import sanitize_for_llm
 
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
@@ -190,6 +191,7 @@ def generate_explanation(evidence: Dict[str, Any], recommendation: str) -> Dict[
             (usage.prompt_tokens / 1_000_000) * _INPUT_COST_PER_1M
             + (usage.completion_tokens / 1_000_000) * _OUTPUT_COST_PER_1M
         )
+        audit_log.log_external_call("groq", model=GROQ_MODEL, success=True, cost_usd=round(cost_usd, 6))
 
         cited_ids = set(_CLAUSE_ID_PATTERN.findall(narrative))
         hallucinated = cited_ids - valid_clause_ids
@@ -205,6 +207,7 @@ def generate_explanation(evidence: Dict[str, Any], recommendation: str) -> Dict[
         return {"narrative": narrative, "source": "llm", "cost_usd": round(cost_usd, 6), "blocked_reason": None}
     except Exception as e:
         logger.warning(f"Groq call failed, using template fallback: {e}")
+        audit_log.log_external_call("groq", model=GROQ_MODEL, success=False, error=str(e))
         return {
             "narrative": _template_fallback(evidence, recommendation),
             "source": "template",

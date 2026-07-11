@@ -103,3 +103,50 @@ def test_llm_failure_falls_back_to_template(monkeypatch):
     result = generate_explanation(SAMPLE_EVIDENCE, "Refer")
     assert result["source"] == "template"
     assert result["blocked_reason"] == "llm_call_failed"
+
+
+def test_issued_call_writes_an_audit_log_entry_on_success(monkeypatch):
+    calls = []
+    monkeypatch.setattr(explanation_module.audit_log, "log_external_call", lambda *a, **k: calls.append((a, k)))
+    fake = _FakeClient("Approved based on strong credit history per POL-PL-001.")
+    monkeypatch.setattr(explanation_module, "_get_client", lambda: fake)
+
+    generate_explanation(SAMPLE_EVIDENCE, "Approve")
+
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args[0] == "groq"
+    assert kwargs["success"] is True
+
+
+def test_issued_call_writes_an_audit_log_entry_on_failure(monkeypatch):
+    calls = []
+    monkeypatch.setattr(explanation_module.audit_log, "log_external_call", lambda *a, **k: calls.append((a, k)))
+
+    class _BrokenClient:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    raise RuntimeError("network error")
+
+    monkeypatch.setattr(explanation_module, "_get_client", lambda: _BrokenClient())
+
+    generate_explanation(SAMPLE_EVIDENCE, "Refer")
+
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args[0] == "groq"
+    assert kwargs["success"] is False
+
+
+def test_skipped_call_writes_no_audit_log_entry(monkeypatch):
+    """Cost-guardrail / no-client / PII-blocked paths never issue the call,
+    so there's nothing to audit (US-406 covers issued calls, not skips)."""
+    calls = []
+    monkeypatch.setattr(explanation_module.audit_log, "log_external_call", lambda *a, **k: calls.append((a, k)))
+    monkeypatch.setattr(explanation_module, "_get_client", lambda: None)
+
+    generate_explanation(SAMPLE_EVIDENCE, "Approve")
+
+    assert calls == []
