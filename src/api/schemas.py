@@ -148,6 +148,13 @@ class PolicyRetrieveResponse(BaseModel):
     retrieval_failed: bool
 
 
+class PolicyReindexResponse(BaseModel):
+    version: str
+    effective_date: str
+    schemes: list[str]
+    clause_count: int
+
+
 # --- Regulatory stub (US-109) ---
 
 

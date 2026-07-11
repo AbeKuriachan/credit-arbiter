@@ -31,14 +31,6 @@ def _load_corpus(path: str = POLICY_CORPUS_PATH) -> dict:
         return json.load(fh)
 
 
-_CORPUS = _load_corpus()
-_CLAUSES = _CORPUS["clauses"]
-_CLAUSE_TEXTS = [f"{clause['title']}. {clause['text']}" for clause in _CLAUSES]
-
-_VECTORIZER = TfidfVectorizer(ngram_range=(1, 2), stop_words="english")
-_CLAUSE_MATRIX = _VECTORIZER.fit_transform(_CLAUSE_TEXTS)
-
-
 def build_query_from_profile(profile: dict) -> str:
     """Render an applicant's normalised profile into a short text query -
     the "application context" FR-4 refers to."""
@@ -117,3 +109,31 @@ def corpus_metadata() -> dict:
         "schemes": _CORPUS["schemes"],
         "clause_count": len(_CLAUSES),
     }
+
+
+def reindex_corpus(path: str = POLICY_CORPUS_PATH) -> dict:
+    """Manual re-index trigger (US-207): reload the policy corpus from
+    `path` and make it live for every subsequent retrieve() call in this
+    process, without a restart. Old decision records stay replayable
+    regardless of what's currently loaded - each stores the clause text and
+    version it actually saw (assessment.py's evidence_chain), not just a
+    version pointer."""
+    global _CORPUS, _CLAUSES, _CLAUSE_TEXTS, _VECTORIZER, _CLAUSE_MATRIX
+
+    corpus = _load_corpus(path)
+    clauses = corpus["clauses"]
+    clause_texts = [f"{clause['title']}. {clause['text']}" for clause in clauses]
+    vectorizer = TfidfVectorizer(ngram_range=(1, 2), stop_words="english")
+    clause_matrix = vectorizer.fit_transform(clause_texts)
+
+    _CORPUS, _CLAUSES, _CLAUSE_TEXTS, _VECTORIZER, _CLAUSE_MATRIX = (
+        corpus,
+        clauses,
+        clause_texts,
+        vectorizer,
+        clause_matrix,
+    )
+    return corpus_metadata()
+
+
+reindex_corpus(POLICY_CORPUS_PATH)
