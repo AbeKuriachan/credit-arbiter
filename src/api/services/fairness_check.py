@@ -74,3 +74,12 @@ def check_fairness(profile: Dict[str, Any]) -> Dict[str, Any]:
             )
 
     return {"fairness_alert": bool(triggered), "triggered_segments": triggered}
+
+
+def current_max_fairness_gap_pp() -> Optional[float]:
+    """Largest |delta_pp| across all segments in the current fairness
+    thresholds file (US-407 dashboard gauge) - the population-level gap
+    from the champion model's last retrain audit, not a per-request value."""
+    segments = _load_thresholds().get("segments", {})
+    deltas = [abs(seg["delta_pp"]) for attr in segments.values() for seg in attr.values() if "delta_pp" in seg]
+    return round(max(deltas), 2) if deltas else None

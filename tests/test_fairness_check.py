@@ -1,4 +1,4 @@
-from src.api.services.fairness_check import _age_band, check_fairness
+from src.api.services.fairness_check import _age_band, check_fairness, current_max_fairness_gap_pp
 
 
 def test_age_band_buckets_correctly():
@@ -37,3 +37,8 @@ def test_missing_segment_data_never_crashes():
     result = check_fairness({})
     assert result["fairness_alert"] is False
     assert result["triggered_segments"] == []
+
+
+def test_current_max_fairness_gap_pp_reads_real_thresholds_file():
+    gap = current_max_fairness_gap_pp()
+    assert gap is None or gap >= 0

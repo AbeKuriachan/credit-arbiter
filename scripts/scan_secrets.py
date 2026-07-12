@@ -28,12 +28,15 @@ def _is_placeholder(value: str) -> bool:
 
 
 _DOC_EXTENSIONS = (".md", ".txt", ".rst")
+# ponytail: this scanner's own test embeds fake secret-shaped literals to
+# verify detection - exclude it or it flags itself every run.
+_SELF_TEST_FILE = "tests/test_secrets_scan.py"
 
 
 def find_secret_literals(paths):
     findings = []
     for path in paths:
-        if str(path).lower().endswith(_DOC_EXTENSIONS):
+        if str(path).lower().endswith(_DOC_EXTENSIONS) or str(path) == _SELF_TEST_FILE:
             continue
         try:
             with open(path, encoding="utf-8", errors="ignore") as fh:

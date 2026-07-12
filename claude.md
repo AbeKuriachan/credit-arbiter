@@ -172,6 +172,28 @@ retrained clean and the numbers below are the honest post-fix result.
   degraded-mode tabletop drill (LLM outage, kill-switch, DB unreachable,
   recovery) with an expected-behavior check for each step.
 
+- [x] **US-407 full - Alert on threshold breach**: `GET /api/metrics` now
+  computes `avg_cost_alert` (AC-8, >$0.05), `p95_latency_alert` (AC-9,
+  >20s), and `fairness_gap_alert`/`fairness_gap_pp` (AC-5, reusing
+  `fairness_check.py`'s existing thresholds-file loader via the new
+  `current_max_fairness_gap_pp()`), alongside the existing
+  `retrieval_failure_alert`. Any breach is logged as a WARNING
+  (`metrics.py`) - a real, durable, greppable alert, not just a dashboard
+  value nobody's looking at - same minimal log-based style as
+  `audit_log.py`, no email/Slack integration added since none exists in
+  this POC.
+- [x] **US-409 Final Acceptance Verification**: `docs/FINAL_ACCEPTANCE_VERIFICATION.md`
+  maps every PRD AC-1...AC-11 to its evidence artefact. 6/11 PASS
+  (AC-1/4/6/8/9/10), 3 FAIL-with-disclosed-cause (AC-2/3/5, all pre-existing
+  known limitations, not hidden), 2 not measurable without more
+  infra/humans (AC-7 needs an LLM-judge harness, AC-11 needs the real
+  pilot).
+- Fixed along the way: `scripts/scan_secrets.py` was flagging its own test
+  file's synthetic secret-shaped fixtures as real findings (pre-existing
+  bug, unrelated to this pass's changes, caught because `pytest` was run
+  full-suite rather than just the new tests) - excluded
+  `tests/test_secrets_scan.py` from the scan.
+
 ### Explicitly not done (needs real humans, not more code)
 - **US-408 underwriter pilot**: requires 3 real underwriters processing real
   files; not applicable to an automated coding pass.
