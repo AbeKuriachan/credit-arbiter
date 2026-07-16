@@ -1,0 +1,16 @@
+{
+    "selected_model_name": "LightGBM (Grid Tuned)",
+    "selected_model_version": "v1_grid_tuned",
+    "reason_for_selection": "LightGBM tuned via GridSearchCV (CV ROC-AUC = 0.7602) outperforming prior champion.",
+    "ROC-AUC": 0.765440057123484,
+    "Precision": 0.17036114570361147,
+    "Recall": 0.6888217522658611,
+    "F1": 0.2731629392971246,
+    "threshold_policy": {
+        "conservative": 0.36,
+        "balanced": 0.66,
+        "revenue_friendly": 0.75
+    },
+    "feature_count": 32,
+    "training_date": "2026-07-08"
+}

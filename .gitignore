@@ -1,3 +1,6 @@
+# Local dev database
+*.db
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -216,3 +219,27 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local secrets — NEVER commit
+.env
+
+# Ingestion pipeline outputs (gitignored; committed only via CI artefacts)
+ddl/
+rejects/
+
+# Runtime audit log (US-406) — local evidence trail, not source
+logs/
+
+# Data (real Home Credit dataset only - data/sample_applications.csv is
+# the small synthetic seed file and stays tracked)
+data/home_credit_data/**/*.csv
+
+# Machine Learning model binaries
+models/**/*.pkl
+models/**/*.joblib
+
+# ML visualization plots
+reports/ml/**/*.png
+
+# Uploaded applicant documents (US-301) - local dev storage only
+uploads/
