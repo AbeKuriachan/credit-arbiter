@@ -21,7 +21,10 @@ from .fairness_check import check_fairness
 from .policy_evaluation import evaluate_policy
 from .regulatory import verify_regulatory
 from .retrieval import retrieve_for_profile
-from .scoring import score_application
+from .scoring import explain_score, score_application
+
+DEFAULT_SCHEME = "Personal Loan"
+MIN_MODEL_CONFIDENCE = 0.60  # US-306: below this, force Refer
 
 GENESIS_HASH = "0" * 64
 
@@ -46,6 +49,11 @@ _RECOMMENDATION_RULES = {
 }
 
 _ESCALATING_RECOMMENDATIONS = {"Refer"}
+_POLICY_ACTION_TO_RECOMMENDATION = {"decline": "Decline", "refer": "Refer", "escalate": "Refer"}
+
+# The six evidence components required for an auditable decision (US-307).
+_EVIDENCE_COMPONENTS = ["risk_score", "risk_factors", "policy_clauses", "document_findings",
+                        "regulatory_result", "fairness_result"]
 
 # PRD §11 specifies "ML model confidence score < 0.60" as an escalation
 # trigger, but a binary probability has no native confidence score - distance
@@ -118,6 +126,7 @@ def run_assessment(db: Session, application: Application, force_regulatory_fail:
         return record
 
     profile = _profile_from_application(application)
+    scheme = application.loan_scheme or DEFAULT_SCHEME
 
     risk_score = None
     risk_band = None
@@ -133,7 +142,16 @@ def run_assessment(db: Session, application: Application, force_regulatory_fail:
         # "ML model confidence score < 0.60 ... -> human-review path").
         ml_confidence = abs(risk_score - 0.5) * 2
     except (ValueError, TypeError):
-        pass  # missing/invalid inputs -> kill-switch below forces Refer
+        pass
+    risk_factors = explain_score(profile)
+    model_confidence = max(risk_score, 1 - risk_score) if risk_score is not None else None
+
+    # --- Policy clauses (component 3) ---
+    retrieval = retrieve_for_profile(profile, scheme=scheme)
+    clauses = retrieval["clauses"]
+    top_clause = clauses[0] if clauses else None
+    corpus_version = retrieval.get("corpus_version")
+    policy = evaluate_policy(clauses, profile, scheme=scheme, corpus_version=corpus_version)
 
     scheme = application.loan_scheme
     retrieval = retrieve_for_profile(profile, scheme=scheme)
@@ -147,13 +165,49 @@ def run_assessment(db: Session, application: Application, force_regulatory_fail:
     ]
     document_result = verify_documents(policy_result["scheme"], application.external_id, uploaded_doc_types)
 
+    # --- Regulatory result (component 5) ---
     regulatory = verify_regulatory(application.external_id, force_fail=force_regulatory_fail)
     fairness_result = check_fairness(_fairness_profile_from_application(application))
 
-    kill_switch_reason = None
-    if risk_score is None:
-        kill_switch_reason = "missing_risk_score"
+    # --- Fairness result (component 6) ---
+    scheme_paused = is_scheme_paused(db, scheme)
+    fairness_result = {"scheme_paused": scheme_paused, "scheme": scheme}
+
+    # --- Cost metering (US-402) & kill-switch (US-405) ---
+    cost = estimate_cost(
+        num_retrieved_clauses=len(clauses),
+        num_regulatory_checks=len(regulatory.get("checks") or []),
+        ran_model_inference=risk_score is not None,
+        ran_document_check=True,
+        projected_explanation_tokens=estimate_explanation_tokens(len(clauses), len(risk_factors)),
+    )
+    kill_switch_on = kill_switch_active(db)
+
+    # --- Evidence completeness (US-307) ---
+    evidence_present = {
+        "risk_score": risk_score is not None,
+        "risk_factors": bool(risk_factors),
+        "policy_clauses": bool(clauses),
+        "document_findings": doc_report is not None,
+        "regulatory_result": regulatory.get("status") is not None,
+        "fairness_result": fairness_result is not None,
+    }
+    missing_components = [c for c in _EVIDENCE_COMPONENTS if not evidence_present[c]]
+    evidence_complete = not missing_components
+
+    # --- Decision + escalation logic ---
+    escalation_reason_code = None
+    if kill_switch_on:
+        recommendation, escalation_flag = "Refer", True
+        escalation_reason_code = "kill_switch_active"
+        kill_switch_reason = "kill_switch_active"
+    elif cost["breached"]:
+        recommendation, escalation_flag = "Refer", True
+        escalation_reason_code = "cost_guardrail"
+        kill_switch_reason = "cost_guardrail_exceeded"
     elif retrieval["retrieval_failed"]:
+        recommendation, escalation_flag = "Refer", True
+        escalation_reason_code = "retrieval_failed"
         kill_switch_reason = "retrieval_failed"
     elif policy_result["thin_file_flag"]:
         kill_switch_reason = "thin_file"
@@ -172,11 +226,25 @@ def run_assessment(db: Session, application: Application, force_regulatory_fail:
         recommendation = "Refer"
         escalation_flag = True
     elif regulatory["status"] == "escalate_for_review":
-        recommendation = "Refer"
-        escalation_flag = True
+        recommendation, escalation_flag = "Refer", True
+        escalation_reason_code = "regulatory_unresolved"
+        kill_switch_reason = None
     else:
+        kill_switch_reason = None
         recommendation = _RECOMMENDATION_RULES.get((regulatory["status"], risk_band), "Refer")
         escalation_flag = recommendation in _ESCALATING_RECOMMENDATIONS
+
+        if not policy["approve_allowed"] and recommendation == "Approve":
+            recommendation = _POLICY_ACTION_TO_RECOMMENDATION.get(policy["required_action"], "Refer")
+        if not doc_report["verified"] and recommendation == "Approve":
+            recommendation = "Refer"  # incomplete/inconsistent docs cannot auto-approve
+            escalation_reason_code = "document_findings"
+        if policy["escalation_required"]:
+            escalation_flag = True
+            escalation_reason_code = escalation_reason_code or "policy_escalation"
+        escalation_flag = escalation_flag or recommendation in _ESCALATING_RECOMMENDATIONS
+        if escalation_flag and escalation_reason_code is None and recommendation == "Refer":
+            escalation_reason_code = "refer_recommendation"
 
     evidence_chain = {
         "risk_score": risk_score,
@@ -185,6 +253,7 @@ def run_assessment(db: Session, application: Application, force_regulatory_fail:
         "ml_confidence": ml_confidence,
         "loan_scheme": policy_result["scheme"],
         "retrieved_clause_id": top_clause["clause_id"] if top_clause else None,
+        "retrieved_source_id": top_clause.get("source_id") if top_clause else None,
         "retrieval_confidence": top_clause["score"] if top_clause else None,
         "retrieved_clauses": all_clauses,
         "policy_passed_rules": policy_result["passed_rules"],
@@ -216,6 +285,8 @@ def run_assessment(db: Session, application: Application, force_regulatory_fail:
         retrieved_clause_text=top_clause["text"] if top_clause else None,
         retrieval_confidence=top_clause["score"] if top_clause else None,
         retrieval_failed=retrieval["retrieval_failed"],
+        policy_version=corpus_version,
+        loan_scheme=scheme,
         regulatory_status=regulatory["status"],
         recommendation=recommendation,
         evidence_chain_json=evidence_chain_json,
@@ -227,4 +298,20 @@ def run_assessment(db: Session, application: Application, force_regulatory_fail:
     db.add(record)
     db.commit()
     db.refresh(record)
+
+    # --- Immutable audit trail (US-401): log the external call then the decision ---
+    append_event(
+        db,
+        "external_call",
+        {"service": "regulatory", "status": regulatory["status"], "checks": regulatory.get("checks")},
+        application_id=application.id,
+        decision_record_id=record.id,
+    )
+    append_event(
+        db,
+        "decision",
+        {"recommendation": recommendation, "evidence_chain": evidence_chain},
+        application_id=application.id,
+        decision_record_id=record.id,
+    )
     return record

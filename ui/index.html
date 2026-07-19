@@ -136,6 +136,7 @@
                 <span class="evidence-label">Narrative Explanation</span>
                 <div id="result-explanation" class="narrative-explanation"></div>
               </div>
+
               <div class="evidence-row">
                 <span class="evidence-label">Recommendation</span>
                 <span id="result-recommendation"></span>
@@ -162,6 +163,14 @@
           </div>
         </div>
 
+      </div>
+    </div>
+
+    <!-- Citation modal (US-309): opens a clause's source text + version -->
+    <div id="clause-modal" class="clause-modal hidden">
+      <div class="clause-modal-card glass-panel">
+        <button id="clause-modal-close" class="clause-modal-close">&times;</button>
+        <div id="clause-modal-body"></div>
       </div>
     </div>
     <div class="background-elements">

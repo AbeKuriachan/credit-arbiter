@@ -45,8 +45,15 @@ const showOverrideBtn = document.getElementById('show-override-btn');
 const overrideForm = document.getElementById('override-form');
 const overrideReasonCode = document.getElementById('override-reason-code');
 const overrideReason = document.getElementById('override-reason');
+const overrideReasonCode = document.getElementById('override-reason-code');
 const submitOverrideBtn = document.getElementById('submit-override-btn');
 const decisionConfirmation = document.getElementById('decision-confirmation');
+const clauseModal = document.getElementById('clause-modal');
+const clauseModalBody = document.getElementById('clause-modal-body');
+const clauseModalClose = document.getElementById('clause-modal-close');
+
+const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // State
 let token = localStorage.getItem('halcyon_token');
@@ -369,8 +376,20 @@ function renderAssessment(decision) {
   overrideForm.classList.add('hidden');
   decisionControls.classList.remove('hidden');
 
-  escalationBanner.classList.toggle('hidden', !decision.escalation_flag);
+  const ev = decision.evidence_chain || {};
+  const ts = decision.created_at ? new Date(decision.created_at).toLocaleString() : '';
+  ['ev-risk-time', 'ev-policy-time', 'ev-docs-time', 'ev-reg-time', 'ev-fair-time']
+    .forEach((id) => { document.getElementById(id).textContent = ts; });
 
+  if (decision.escalation_flag) {
+    const code = decision.escalation_reason_code ? ` — ${decision.escalation_reason_code.replace(/_/g, ' ')}` : '';
+    escalationBanner.textContent = `Escalated for human review${code}`;
+    escalationBanner.classList.remove('hidden');
+  } else {
+    escalationBanner.classList.add('hidden');
+  }
+
+  // 1 · Risk & factors (SHAP-style contributors)
   const bandClass = decision.risk_band ? `badge-${decision.risk_band.toLowerCase()}` : '';
   resultRisk.innerHTML = decision.risk_score !== null && decision.risk_score !== undefined
     ? `<span class="badge ${bandClass}">${decision.risk_band}</span>&nbsp; ${(decision.risk_score * 100).toFixed(1)}% probability of default`
@@ -449,6 +468,10 @@ function renderAssessment(decision) {
 
   const recommendationClass = `badge-${decision.recommendation.toLowerCase()}`;
   resultRecommendation.innerHTML = `<span class="badge ${recommendationClass}">${decision.recommendation}</span>`;
+
+  evPolicy.querySelectorAll('.citation').forEach((btn) => {
+    btn.addEventListener('click', () => openClause(btn.dataset.clause, btn.dataset.version));
+  });
 }
 
 async function handleDecision(action, reason, reasonCode) {
