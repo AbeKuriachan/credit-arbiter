@@ -20,7 +20,9 @@ def test_unrelated_query_flags_retrieval_failed():
 
 
 def test_thin_file_query_matches_escalation_clause():
-    result = retrieve("applicant has thin file short employment history bureau record")
+    result = retrieve(
+        "applicant has thin file short employment history bureau record", scheme="Personal Loan"
+    )
     assert result["retrieval_failed"] is False
     assert result["clauses"][0]["clause_id"] == "POL-PL-004"
 
